@@ -7,23 +7,26 @@ import ReactDOM from "react-dom/client";
 import App from "./App.tsx";
 import { routeTree } from "./routeTree.gen.ts";
 
-const router = createRouter({ routeTree });
+const router = createRouter({
+  routeTree,
+  defaultPreload: 'intent',
+});
 
 declare module "@tanstack/react-router" {
-	interface Register {
-		// This infers the type of our router and registers it across your entire project
-		router: typeof router;
-	}
+  interface Register {
+    // This infers the type of our router and registers it across your entire project
+    router: typeof router;
+  }
 }
 
 const rootElement = document.querySelector("#root") as Element;
 if (!rootElement.innerHTML) {
-	const root = ReactDOM.createRoot(rootElement);
-	root.render(
-		<React.StrictMode>
-			<React.Suspense fallback="loading">
-				<App router={router} />
-			</React.Suspense>
-		</React.StrictMode>
-	);
+  const root = ReactDOM.createRoot(rootElement);
+  root.render(
+    <React.StrictMode>
+      <React.Suspense fallback="loading">
+        <App router={router} />
+      </React.Suspense>
+    </React.StrictMode>
+  );
 }

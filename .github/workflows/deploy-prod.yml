@@ -3,8 +3,8 @@ name: Deploy to Production
 on:
   push:
     branches:
-      - main  # or your production branch
-  workflow_dispatch:  # allows manual trigger
+      - main  # hoặc branch production của bạn
+  workflow_dispatch:  # cho phép kích hoạt thủ công
 
 env:
   DOCKER_IMAGE: rezentry-app
@@ -19,16 +19,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add known hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -49,39 +39,42 @@ jobs:
           cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:buildcache,mode=max
 
       - name: Deploy to VPS
-        env:
-          VPS_USER: ${{ secrets.VPS_USER }}
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          DOCKER_IMAGE_TAG: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-        run: |
-          # Deploy script
-          ssh $VPS_USER@$VPS_HOST << 'ENDSSH'
-            # Pull the new image
-            docker pull $DOCKER_IMAGE_TAG
+        uses: and-fm/cloudflared-ssh-action@v3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          private_key_filename: ${{ secrets.SSH_PRIVATE_KEY_FILENAME }}
+          private_key_value: ${{ secrets.SSH_PRIVATE_KEY_VALUE }}
+          port: ${{ secrets.SSH_PORT }}
+          service_token_id: ${{ secrets.SERVICE_TOKEN_ID }}
+          service_token_secret: ${{ secrets.SERVICE_TOKEN_SECRET }}
+          commands: |
+            # Deploy script
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
 
             # Check if temp container exists and remove it
-            if [ "$(docker ps -aq -f name=$DOCKER_CONTAINER_TEMP)" ]; then
-              docker rm -f $DOCKER_CONTAINER_TEMP
+            if [ "$(docker ps -aq -f name=${{ env.DOCKER_CONTAINER_TEMP }})" ]; then
+              docker rm -f ${{ env.DOCKER_CONTAINER_TEMP }}
             fi
 
             # Start new container on a different port
             docker run -d \
-              --name $DOCKER_CONTAINER_TEMP \
+              --name ${{ env.DOCKER_CONTAINER_TEMP }} \
               -p 3001:80 \
-              $DOCKER_IMAGE_TAG
+              ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ github.sha }}
 
             # Wait for the new container to be healthy
             sleep 10
 
             # Check if the new container is running
-            if [ "$(docker ps -q -f name=$DOCKER_CONTAINER_TEMP)" ]; then
+            if [ "$(docker ps -q -f name=${{ env.DOCKER_CONTAINER_TEMP }})" ]; then
               # Stop and remove the old container
-              if [ "$(docker ps -aq -f name=$DOCKER_CONTAINER)" ]; then
-                docker rm -f $DOCKER_CONTAINER
+              if [ "$(docker ps -aq -f name=${{ env.DOCKER_CONTAINER }})" ]; then
+                docker rm -f ${{ env.DOCKER_CONTAINER }}
               fi
 
               # Rename the temp container to the production name
-              docker rename $DOCKER_CONTAINER_TEMP $DOCKER_CONTAINER
+              docker rename ${{ env.DOCKER_CONTAINER_TEMP }} ${{ env.DOCKER_CONTAINER }}
 
               # Update nginx reverse proxy or load balancer configuration
               # This assumes you have nginx set up as a reverse proxy
@@ -110,7 +103,6 @@ jobs:
               echo "Deployment successful!"
             else
               echo "New container failed to start. Rolling back..."
-              docker rm -f $DOCKER_CONTAINER_TEMP
+              docker rm -f ${{ env.DOCKER_CONTAINER_TEMP }}
               exit 1
             fi
-          ENDSSH
